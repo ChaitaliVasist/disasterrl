@@ -1,4 +1,9 @@
 trigger:
+- task: Docker@2
+  inputs:
+    repository: 'disaster1'
+    command: 'buildAndPush'
+    Dockerfile: '**/Dockerfile'
   - main
 
 pool:
