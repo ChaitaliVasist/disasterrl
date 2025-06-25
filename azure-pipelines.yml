@@ -1,0 +1,101 @@
+trigger:
+  - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  dockerImageName: 'disasterrl-app'
+  sonarProjectKey: 'ChaitaliVasist_disasterrl'
+  sonarOrganization: 'your-sonar-org'
+  netlifySiteID: 'your-site-id'
+  netlifyToken: '$(NETLIFY_AUTH_TOKEN)'
+  snykToken: '$(SNYK_AUTH_TOKEN)'
+
+stages:
+
+# 1. SonarQube Quality Gate
+- stage: CodeQuality
+  jobs:
+    - job: SonarQubeScan
+      steps:
+        - checkout: self
+
+        - task: SonarCloudPrepare@1
+          inputs:
+            SonarCloud: 'Your-SonarCloud-Service-Connection'
+            organization: '$(sonarOrganization)'
+            scannerMode: 'CLI'
+            configMode: 'manual'
+            cliProjectKey: '$(sonarProjectKey)'
+            cliProjectName: 'DisasterRL'
+            extraProperties: |
+              sonar.sources=src
+
+        - script: |
+            echo "Running Sonar Scanner..."
+            sonar-scanner
+          displayName: 'Run Sonar Scanner'
+
+        - task: SonarCloudPublish@1
+          inputs:
+            pollingTimeoutSec: '300'
+
+# 2. Docker Build & Push
+- stage: DockerBuild
+  jobs:
+    - job: BuildAndPush
+      steps:
+        - task: Docker@2
+          inputs:
+            containerRegistry: 'YourDockerHubConnection'
+            repository: 'chaitalivasist/disasterrl'
+            command: 'buildAndPush'
+            Dockerfile: '**/Dockerfile'
+            tags: |
+              latest
+
+# 3. Trivy Vulnerability Scan
+- stage: TrivyScan
+  jobs:
+    - job: ScanDockerImage
+      steps:
+        - script: |
+            sudo apt-get install wget apt-transport-https gnupg lsb-release
+            wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+            echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+            sudo apt-get update
+            sudo apt-get install trivy -y
+            trivy image chaitalivasist/disasterrl:latest
+          displayName: 'Run Trivy Scan'
+
+# 4. Snyk Security Test
+- stage: SnykSecurity
+  jobs:
+    - job: SnykScan
+      steps:
+        - script: |
+            npm install -g snyk
+            snyk auth $(snykToken)
+            snyk test
+          displayName: 'Run Snyk Scan'
+
+# 5. Lighthouse Performance Audit
+- stage: LighthouseAudit
+  jobs:
+    - job: RunLighthouse
+      steps:
+        - script: |
+            npm install -g lighthouse
+            lighthouse https://your-netlify-app-url.netlify.app --output html --output-path report.html
+          displayName: 'Lighthouse Performance Audit'
+
+# 6. Netlify Deploy
+- stage: DeployNetlify
+  jobs:
+    - job: DeployFrontend
+      steps:
+        - script: |
+            npm install -g netlify-cli
+            netlify deploy --dir=build --site=$(netlifySiteID) --auth=$(netlifyToken) --prod
+          displayName: 'Deploy to Netlify'
